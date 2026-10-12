@@ -113,10 +113,10 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(34
 .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:12px;font-weight:700;color:var(--muted)}
 .legend span{display:flex;align-items:center;gap:6px}
 
-.chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{border:1.5px solid var(--line);background:#fff;padding:5px 13px;border-radius:99px;font-family:inherit;font-size:12.5px;font-weight:800;color:var(--muted);cursor:pointer;transition:.15s}
-.chip:hover{border-color:#b9c6d2;color:var(--ink)}
-.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.tabs{display:flex;gap:6px;background:#eef2f6;padding:5px;border-radius:12px}
+.tab{border:0;background:transparent;padding:7px 16px;border-radius:9px;font-family:inherit;font-size:13px;font-weight:800;color:var(--muted);cursor:pointer;transition:.18s}
+.tab:hover{color:var(--ink)}
+.tab.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(23,36,49,.15)}
 .btn-mini{border:1.5px solid var(--line);background:#fff;border-radius:8px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:800;color:var(--muted);cursor:pointer;transition:.15s}
 .btn-mini:hover{color:var(--ink);border-color:#b9c6d2}
 .btn-mini[disabled]{opacity:.55;cursor:wait}
@@ -244,11 +244,9 @@ footer{padding:0 0 40px;text-align:center;font-size:12px;color:var(--muted)}
       <div class="card-head">
         <h2 class="card-title">История</h2>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div class="chips" id="chips">
-            <button class="chip on" data-f="all">Все</button>
-            <button class="chip" data-f="cold">ХВС</button>
-            <button class="chip" data-f="hot">ГВС</button>
-            <button class="chip" data-f="electro">Свет</button>
+          <div class="tabs" id="histTabs">
+            <button class="tab on" data-tab="water">💧 Вода</button>
+            <button class="tab" data-tab="electro">⚡ Свет</button>
           </div>
           <button class="btn-mini" id="btnXlsx" title="Скачать книгу Excel">⬇ Excel</button>
           <button class="btn-mini" id="btnImport" title="Восстановить данные из файла Excel (.xlsx)">⬆ Восстановить</button>
@@ -265,15 +263,14 @@ footer{padding:0 0 40px;text-align:center;font-size:12px;color:var(--muted)}
 <div id="toast" role="status"></div>
 
 <script>
-/* ================= загрузка библиотеки Excel (4 источника по очереди) ================= */
-/* Порядок: локальный файл рядом с сайтом → 3 мировых CDN.                            */
+/* ================= загрузка библиотеки Excel ================= */
 const xlsxReady = new Promise((resolve,reject)=>{
   if(typeof XLSX!=='undefined') return resolve('уже загружена');
   const sources=[
-    'xlsx.full.min.js',                                                    // 1) локальный файл рядом с index.html
-    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', // 2) cdnjs
-    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',      // 3) jsdelivr
-    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'    // 4) официальный сервер SheetJS
+    'xlsx.full.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
   ];
   let i=0;
   (function next(){
@@ -301,7 +298,7 @@ const LS_KEY = 'kommunalka-v1';
 
 let state = { tariffs:{cold:45, hot:220, electro:6.5}, currency:'₽', readings:[] };
 let formType = 'cold';
-let historyFilter = 'all';
+let historyTab = 'water'; // 'water' | 'electro'
 let freshId = null;
 
 function load(){ try{
@@ -328,11 +325,10 @@ let toastTimer;
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),3500); }
 
-// ждём библиотеку; если не загрузилась — понятное сообщение
 async function ensureXLSX(){
   try{ await xlsxReady; return true; }
   catch(e){
-    toast('Библиотека Excel недоступна. Скачайте файл «xlsx.full.min.js» (ссылка в инструкции) и положите рядом с этим сайтом — тогда всё будет работать без интернета');
+    toast('Библиотека Excel недоступна. Скачайте файл «xlsx.full.min.js» и положите рядом с этим сайтом');
     return false;
   }
 }
@@ -440,30 +436,66 @@ function renderChart(){
 
 function renderHistory(){
   const wrap=document.getElementById('historyWrap');
-  const rows=getEntries().filter(r=>historyFilter==='all'||r.type===historyFilter).sort((a,b)=>-byDT(a,b));
-  if(!rows.length){
-    wrap.innerHTML=`<div class="empty">Пока нет записей.<br>
-      Добавьте первое показание слева или
-      <br><button class="btn btn-ghost" id="btnDemo">Загрузить демо-данные</button></div>`;
-    return;
-  }
-  wrap.innerHTML=`<table><thead><tr>
-    <th>Дата</th><th>Счётчик</th><th class="num">Показание</th><th class="num">Расход</th>
-    <th class="num">Тариф</th><th class="num">Сумма</th><th></th></tr></thead><tbody>`+
-    rows.map(r=>{
-      const t=TYPES[r.type];
+  const all=getEntries().sort((a,b)=>-byDT(a,b));
+
+  if(historyTab==='water'){
+    const rows=all.filter(r=>r.type==='cold'||r.type==='hot');
+    if(!rows.length){
+      wrap.innerHTML=`<div class="empty">Нет записей по воде.<br>Добавьте показания ХВС или ГВС слева, или <button class="btn btn-ghost" id="btnDemo">загрузите демо</button></div>`;
+      return;
+    }
+    // Группируем по дате
+    const groups={};
+    rows.forEach(r=>{ if(!groups[r.date]) groups[r.date]={date:r.date,cold:null,hot:null,fresh:false};
+      groups[r.date][r.type]=r; if(r.id===freshId) groups[r.date].fresh=true; });
+    const sorted=Object.values(groups).sort((a,b)=>b.date.localeCompare(a.date));
+
+    wrap.innerHTML=`<table><thead><tr>
+      <th>Дата</th>
+      <th class="num">Показ. ХВС</th><th class="num">Расход ХВС</th>
+      <th class="num">Показ. ГВС</th><th class="num">Расход ГВС</th>
+      <th class="num">Сумма</th><th></th>
+    </tr></thead><tbody>`+sorted.map(g=>{
+      const c=g.cold, h=g.hot;
+      const cCons=c&&c.consumption!=null?`<span class="${c.consumption<0?'neg':''}">${fmtNum(c.consumption)}</span>`:'<span class="muted">—</span>';
+      const hCons=h&&h.consumption!=null?`<span class="${h.consumption<0?'neg':''}">${fmtNum(h.consumption)}</span>`:'<span class="muted">—</span>';
+      const cVal=c?fmtNum(c.value):'<span class="muted">—</span>';
+      const hVal=h?fmtNum(h.value):'<span class="muted">—</span>';
+      const sum=(c&&c.cost||0)+(h&&h.cost||0);
+      const ids=[]; if(c) ids.push(c.id); if(h) ids.push(h.id);
+      return `<tr class="${g.fresh?'fresh':''}">
+        <td>${fmtDate(g.date)}</td>
+        <td class="num">${cVal} <span class="muted">м³</span></td>
+        <td class="num">${cCons}</td>
+        <td class="num">${hVal} <span class="muted">м³</span></td>
+        <td class="num">${hCons}</td>
+        <td class="num"><b>${sum>0?fmtMoney(sum):'—'}</b></td>
+        <td>${ids.map(id=>`<button class="del" data-del="${id}" title="Удалить">×</button>`).join('')}</td>
+      </tr>`;
+    }).join('')+'</tbody></table>';
+
+  } else {
+    const rows=all.filter(r=>r.type==='electro');
+    if(!rows.length){
+      wrap.innerHTML=`<div class="empty">Нет записей по электричеству.<br>Добавьте показания света слева, или <button class="btn btn-ghost" id="btnDemo">загрузите демо</button></div>`;
+      return;
+    }
+    wrap.innerHTML=`<table><thead><tr>
+      <th>Дата</th><th class="num">Показание</th><th class="num">Расход</th>
+      <th class="num">Тариф</th><th class="num">Сумма</th><th></th>
+    </tr></thead><tbody>`+rows.map(r=>{
       const cons=r.consumption==null?'<span class="muted">—</span>'
         :`<span class="${r.consumption<0?'neg':''}">${fmtNum(r.consumption)}</span>`;
       return `<tr class="${r.id===freshId?'fresh':''}">
         <td>${fmtDate(r.date)}</td>
-        <td><i class="dot" style="background:${t.color}"></i>${t.short}${r.reset?' <span class="muted">(новый отсчёт)</span>':''}</td>
-        <td class="num">${fmtNum(r.value)} <span class="muted">${t.unit}</span></td>
+        <td class="num">${fmtNum(r.value)} <span class="muted">кВт·ч</span></td>
         <td class="num">${cons}</td>
         <td class="num">${fmtNum(r.price)}</td>
         <td class="num"><b>${r.cost==null?'—':fmtMoney(r.cost)}</b></td>
         <td><button class="del" data-del="${r.id}" title="Удалить">×</button></td>
       </tr>`;
     }).join('')+'</tbody></table>';
+  }
   freshId=null;
 }
 
@@ -519,6 +551,9 @@ form.addEventListener('submit',e=>{
   state.readings.push({ id:uid(), type:formType, date, value:v,
     price:state.tariffs[formType], reset:!!(prev && $('fReset').checked), ts:Date.now() });
   freshId=state.readings[state.readings.length-1].id;
+  // автопереключение вкладки истории
+  historyTab = formType==='electro'?'electro':'water';
+  $('histTabs').querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===historyTab));
   save(); renderAll(); toast('Показание записано ✓');
   $('fValue').value=''; updateFormUI(); $('fValue').focus();
 });
@@ -543,11 +578,11 @@ $('btnClear').addEventListener('click',()=>{
   save(); fillTariffInputs(); renderAll(); toast('Данные очищены');
 });
 
-/* ================= история: фильтры, удаление ================= */
-$('chips').addEventListener('click',e=>{
-  const b=e.target.closest('.chip'); if(!b) return;
-  historyFilter=b.dataset.f;
-  $('chips').querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b));
+/* ================= история: табы, удаление ================= */
+$('histTabs').addEventListener('click',e=>{
+  const b=e.target.closest('.tab'); if(!b) return;
+  historyTab=b.dataset.tab;
+  $('histTabs').querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));
   renderHistory();
 });
 document.addEventListener('click',e=>{
@@ -562,38 +597,58 @@ document.addEventListener('click',e=>{
 
 /* ================= экспорт: Excel (.xlsx) ================= */
 async function exportXLSX(){
-  const rows=getEntries().sort((a,b)=>-byDT(a,b));
-  if(!rows.length) return toast('История пуста — нечего выгружать');
+  const entries=getEntries().sort((a,b)=>-byDT(a,b));
+  if(!entries.length) return toast('История пуста — нечего выгружать');
   const btn=$('btnXlsx'); btn.disabled=true; btn.textContent='⏳ Готовим…';
   const ok=await ensureXLSX();
   if(!ok){ btn.disabled=false; btn.textContent='⬇ Excel'; return; }
   const wb=XLSX.utils.book_new();
 
-  const d1=[['Дата','Счётчик','Показание','Ед.','Расход','Тариф','Сумма','Примечание']];
-  rows.forEach(r=>d1.push([fmtDate(r.date),TYPES[r.type].label,r.value,TYPES[r.type].unit,
-    r.consumption==null?'':r.consumption, r.price, r.cost==null?'':r.cost,
-    r.reset?'новый отсчёт':'']));
+  // Лист 1 — Вода (сведены ХВС и ГВС по датам)
+  const waterRows=entries.filter(r=>r.type==='cold'||r.type==='hot');
+  const wGroups={};
+  waterRows.forEach(r=>{ if(!wGroups[r.date]) wGroups[r.date]={date:r.date,cold:null,hot:null}; wGroups[r.date][r.type]=r; });
+  const wSorted=Object.values(wGroups).sort((a,b)=>b.date.localeCompare(a.date));
+  const d1=[['Дата','Показание ХВС (м³)','Расход ХВС (м³)','Тариф ХВС','Сумма ХВС','Показание ГВС (м³)','Расход ГВС (м³)','Тариф ГВС','Сумма ГВС','Итого сумма']];
+  wSorted.forEach(g=>{
+    const c=g.cold, h=g.hot;
+    const sum=(c&&c.cost||0)+(h&&h.cost||0);
+    d1.push([fmtDate(g.date),
+      c?c.value:'', c&&c.consumption!=null?c.consumption:'', c?c.price:'', c&&c.cost!=null?c.cost:'',
+      h?h.value:'', h&&h.consumption!=null?h.consumption:'', h?h.price:'', h&&h.cost!=null?h.cost:'',
+      sum||'']);
+  });
   const ws1=XLSX.utils.aoa_to_sheet(d1);
-  ws1['!cols']=[{wch:11},{wch:18},{wch:12},{wch:8},{wch:10},{wch:9},{wch:12},{wch:14}];
-  XLSX.utils.book_append_sheet(wb,ws1,'Показания');
+  ws1['!cols']=[{wch:11},{wch:16},{wch:14},{wch:10},{wch:12},{wch:16},{wch:14},{wch:10},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Вода');
 
+  // Лист 2 — Свет
+  const elRows=entries.filter(r=>r.type==='electro').sort((a,b)=>b.date.localeCompare(a.date));
+  const d2=[['Дата','Показание (кВт·ч)','Расход (кВт·ч)','Тариф','Сумма','Примечание']];
+  elRows.forEach(r=>d2.push([fmtDate(r.date),r.value,r.consumption==null?'':r.consumption,r.price,r.cost==null?'':r.cost,r.reset?'новый отсчёт':'']));
+  const ws2=XLSX.utils.aoa_to_sheet(d2);
+  ws2['!cols']=[{wch:11},{wch:18},{wch:14},{wch:10},{wch:12},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Свет');
+
+  // Лист 3 — По месяцам
   const months=monthlySummary();
-  const d2=[['Месяц','ХВС, м³','ХВС, сумма','ГВС, м³','ГВС, сумма','Электричество, кВт·ч','Электричество, сумма','Итого']];
+  const d3=[['Месяц','ХВС, м³','ХВС, сумма','ГВС, м³','ГВС, сумма','Электричество, кВт·ч','Электричество, сумма','Итого']];
   const tot={cc:0,cs:0,hc:0,hs:0,ec:0,es:0,sum:0};
   months.forEach(m=>{
     const total=+(m.cold.s+m.hot.s+m.electro.s).toFixed(2);
     tot.cc+=m.cold.c; tot.cs+=m.cold.s; tot.hc+=m.hot.c; tot.hs+=m.hot.s;
     tot.ec+=m.electro.c; tot.es+=m.electro.s; tot.sum+=total;
-    d2.push([m.label, m.cold.c||'', m.cold.s||'', m.hot.c||'', m.hot.s||'',
+    d3.push([m.label, m.cold.c||'', m.cold.s||'', m.hot.c||'', m.hot.s||'',
       m.electro.c||'', m.electro.s||'', total||'']);
   });
-  d2.push(['Итого',+tot.cc.toFixed(3),+tot.cs.toFixed(2),+tot.hc.toFixed(3),
+  d3.push(['Итого',+tot.cc.toFixed(3),+tot.cs.toFixed(2),+tot.hc.toFixed(3),
     +tot.hs.toFixed(2),+tot.ec.toFixed(3),+tot.es.toFixed(2),+tot.sum.toFixed(2)]);
-  const ws2=XLSX.utils.aoa_to_sheet(d2);
-  ws2['!cols']=[{wch:11},{wch:10},{wch:12},{wch:10},{wch:12},{wch:22},{wch:20},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,ws2,'По месяцам');
+  const ws3=XLSX.utils.aoa_to_sheet(d3);
+  ws3['!cols']=[{wch:11},{wch:10},{wch:12},{wch:10},{wch:12},{wch:22},{wch:20},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws3,'По месяцам');
 
-  const ws3=XLSX.utils.aoa_to_sheet([
+  // Лист 4 — Тарифы
+  const ws4=XLSX.utils.aoa_to_sheet([
     ['Тариф','Значение','Единица'],
     ['Холодная вода', state.tariffs.cold,    state.currency+' за м³'],
     ['Горячая вода',  state.tariffs.hot,     state.currency+' за м³'],
@@ -601,8 +656,8 @@ async function exportXLSX(){
     [],
     ['Дата выгрузки', fmtDate(todayISO())]
   ]);
-  ws3['!cols']=[{wch:18},{wch:10},{wch:16}];
-  XLSX.utils.book_append_sheet(wb,ws3,'Тарифы');
+  ws4['!cols']=[{wch:18},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws4,'Тарифы');
 
   XLSX.writeFile(wb, 'kommunalka_'+todayISO()+'.xlsx');
   btn.disabled=false; btn.textContent='⬇ Excel';
@@ -655,35 +710,72 @@ function importXLSX(file){
   reader.onload=e=>{
     try{
       const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
-      const sheetName=wb.SheetNames.includes('Показания')?'Показания':wb.SheetNames[0];
-      const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
-
-      let hi=-1, idx=null;
-      for(let i=0;i<Math.min(rows.length,10);i++){
-        const r=rows[i].map(c=>String(c).trim().toLowerCase());
-        if(r.includes('дата')&&r.includes('показание')){
-          hi=i; idx={date:r.indexOf('дата'), value:r.indexOf('показание'),
-            type:Math.max(r.indexOf('счётчик'),r.indexOf('тип')),
-            price:r.indexOf('тариф'), note:r.indexOf('примечание')};
-          break;
+      
+      // Ищем лист с показаниями (поддерживаем старый формат "Показания" и новые "Вода"/"Свет")
+      const parsed=[]; let skipped=0;
+      
+      // Парсим лист "Вода" или "Показания"
+      const waterSheet = wb.SheetNames.includes('Вода') ? 'Вода' : (wb.SheetNames.includes('Показания') ? 'Показания' : null);
+      if(waterSheet){
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[waterSheet],{header:1,defval:''});
+        let hi=-1, idx=null;
+        for(let i=0;i<Math.min(rows.length,10);i++){
+          const r=rows[i].map(c=>String(c).trim().toLowerCase());
+          if(r.includes('дата')&&(r.includes('показание')||r.some(c=>c.includes('хвс')))){
+            hi=i;
+            idx={date:r.indexOf('дата'), value:r.findIndex(c=>c.includes('показание')&&!c.includes('гвс')),
+              type:r.findIndex(c=>c==='счётчик'||c==='тип'),
+              price:r.indexOf('тариф'), note:r.indexOf('примечание')};
+            // Если это новый формат "Вода" — колонки фиксированы
+            if(waterSheet==='Вода'){
+              idx={date:0, coldVal:1, coldCons:2, coldPrice:3, coldCost:4, hotVal:5, hotCons:6, hotPrice:7, hotCost:8};
+            }
+            break;
+          }
+        }
+        if(hi>=0){
+          if(waterSheet==='Вода'){
+            for(const raw of rows.slice(hi+1)){
+              if(!raw||raw.every(c=>c===''||c==null)) continue;
+              const date=parseAnyDate(raw[0]);
+              if(!date){skipped++;continue;}
+              const cv=typeof raw[1]==='number'?raw[1]:parseNum(raw[1]);
+              const cp=typeof raw[3]==='number'?raw[3]:parseNum(raw[3]);
+              if(cv!=null&&cv>=0) parsed.push({date,type:'cold',value:+cv.toFixed(3),price:cp&&cp>0?+cp.toFixed(4):state.tariffs.cold,reset:false});
+              const hv=typeof raw[5]==='number'?raw[5]:parseNum(raw[5]);
+              const hp=typeof raw[7]==='number'?raw[7]:parseNum(raw[7]);
+              if(hv!=null&&hv>=0) parsed.push({date,type:'hot',value:+hv.toFixed(3),price:hp&&hp>0?+hp.toFixed(4):state.tariffs.hot,reset:false});
+            }
+          } else {
+            for(const raw of rows.slice(hi+1)){
+              if(!raw||raw.every(c=>c===''||c==null)) continue;
+              const date=parseAnyDate(raw[idx.date]);
+              const type=idx.type>=0?mapType(raw[idx.type]):null;
+              const value=typeof raw[idx.value]==='number'?raw[idx.value]:parseNum(raw[idx.value]);
+              if(!date||!type||value==null||value<0){skipped++;continue;}
+              let price=idx.price>=0?(typeof raw[idx.price]==='number'?raw[idx.price]:parseNum(raw[idx.price])):null;
+              if(price==null||price<=0) price=state.tariffs[type];
+              const note=idx.note>=0?String(raw[idx.note]):'';
+              parsed.push({date,type,value:+value.toFixed(3),price:+price.toFixed(4),reset:note.toLowerCase().includes('новый отсчёт')});
+            }
+          }
         }
       }
-      if(hi<0||idx.date<0||idx.value<0||idx.type<0)
-        return toast('В файле нет таблицы с колонками «Дата», «Тип/Счётчик», «Показание»');
-
-      const parsed=[]; let skipped=0;
-      for(const raw of rows.slice(hi+1)){
-        if(!raw || raw.every(c=>c===''||c==null)) continue;
-        const date=parseAnyDate(raw[idx.date]);
-        const type=mapType(raw[idx.type]);
-        const value=typeof raw[idx.value]==='number'?raw[idx.value]:parseNum(raw[idx.value]);
-        if(!date||!type||value==null||value<0){ skipped++; continue; }
-        let price=idx.price>=0 ? (typeof raw[idx.price]==='number'?raw[idx.price]:parseNum(raw[idx.price])) : null;
-        if(price==null||price<=0) price=state.tariffs[type];
-        const note=idx.note>=0?String(raw[idx.note]):'';
-        parsed.push({date,type,value:+value.toFixed(3),price:+price.toFixed(4),
-          reset:note.toLowerCase().includes('новый отсчёт')});
+      
+      // Парсим лист "Свет"
+      if(wb.SheetNames.includes('Свет')){
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets['Свет'],{header:1,defval:''});
+        for(const raw of rows.slice(1)){
+          if(!raw||raw.every(c=>c===''||c==null)) continue;
+          const date=parseAnyDate(raw[0]);
+          const value=typeof raw[1]==='number'?raw[1]:parseNum(raw[1]);
+          const price=typeof raw[3]==='number'?raw[3]:parseNum(raw[3]);
+          const note=raw[5]?String(raw[5]):'';
+          if(!date||value==null||value<0){skipped++;continue;}
+          parsed.push({date,type:'electro',value:+value.toFixed(3),price:price&&price>0?+price.toFixed(4):state.tariffs.electro,reset:note.toLowerCase().includes('новый отсчёт')});
+        }
       }
+
       if(!parsed.length) return toast('В файле не найдено корректных записей');
 
       const replace = state.readings.length===0 ||
@@ -714,6 +806,7 @@ function importXLSX(file){
       if(tariffRestored) msg+=' · тарифы восстановлены';
       toast(msg);
     }catch(err){
+      console.error(err);
       toast('Не удалось прочитать файл. Убедитесь, что это файл из выгрузки «⬇ Excel»');
     }
   };
